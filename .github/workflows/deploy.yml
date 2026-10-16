@@ -1,0 +1,62 @@
+# Deployment nach Azure Static Web Apps (swa-mwlabs-web)
+# - Push auf main          -> Produktion (https://mw-labs.at)
+# - PR auf main            -> Preview-Umgebung, URL als PR-Kommentar
+# - PR geschlossen/gemergt -> Preview-Umgebung wird entfernt
+#
+# Sicherheit (oeffentliches Repo):
+# - Kein pull_request_target, kein workflow_run: Fork-PRs bekommen keine Secrets.
+# - Deploy/Close laufen nur fuer Push auf main oder PRs aus diesem Repo (nicht aus Forks).
+# - Alle Actions auf Commit-SHA gepinnt; Updates kommen ueber Dependabot.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swa-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy
+    if: github.event_name == 'push' || (github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # Preview-URL als PR-Kommentar
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Deploy nach Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: src
+          output_location: ""
+          skip_app_build: true
+          skip_api_build: true
+
+  close:
+    name: Preview entfernen
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Preview-Umgebung schliessen
+        uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: close
+          app_location: src
